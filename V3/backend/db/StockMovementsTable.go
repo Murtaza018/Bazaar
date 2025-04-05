@@ -251,3 +251,5 @@ VALUES (
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Stock manually removed successfully"))
 }
+
+func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {}
