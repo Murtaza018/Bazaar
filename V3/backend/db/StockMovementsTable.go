@@ -252,4 +252,5 @@ VALUES (
 	w.Write([]byte("Stock manually removed successfully"))
 }
 
-func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {}
+func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {//generates report on how many products were received and how many were sold
+	}
