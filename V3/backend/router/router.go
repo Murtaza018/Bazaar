@@ -29,6 +29,7 @@ func SetupRouter() *mux.Router {
 	r.HandleFunc("/stock/in",db.StockIn).Methods("POST")	
 	r.HandleFunc("/stock/out",db.StockOut).Methods("POST")	
 	r.HandleFunc("/stock/sold",db.StockSold).Methods("POST")	
+	r.HandleFunc("/stock/receivedsoldreport",db.ProductReceivedSoldReport).Methods("POST")	
 
 	//Supplier routes
 	r.HandleFunc("/supplier/insert",db.InsertSupplier).Methods("POST")

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -252,5 +253,66 @@ VALUES (
 	w.Write([]byte("Stock manually removed successfully"))
 }
 
-func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {//generates report on how many products were received and how many were sold
+func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {
+	// Parse JSON body to get store_id
+	var input struct {
+		StoreID int `json:"store_id"`
 	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// SQL Query for report
+	query := `
+	SELECT 
+		EXTRACT(YEAR FROM sm.timestamp) AS year,
+		p.name,
+		p.description,
+		SUM(CASE WHEN sm.movement_type = 'stock_in' THEN sm.quantity ELSE 0 END) AS total_received,
+		SUM(CASE WHEN sm.movement_type = 'stock_sold' THEN sm.quantity ELSE 0 END) AS total_sold
+	FROM 
+		StockMovements sm
+	JOIN 
+		Inventory i ON sm.inventory_id = i.inventory_id
+	JOIN 
+		Products p ON i.product_id = p.product_id
+	WHERE 
+		i.store_id = $1
+	GROUP BY 
+		year, p.name, p.description
+	ORDER BY 
+		year, p.name;
+	`
+
+	rows, err := Db.Query(query, input.StoreID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type Report struct {
+		Year          int    `json:"year"`
+		Name          string `json:"name"`
+		Description   string `json:"description"`
+		TotalReceived int    `json:"total_received"`
+		TotalSold     int    `json:"total_sold"`
+	}
+
+	var reports []Report
+
+	for rows.Next() {
+		var r Report
+		err := rows.Scan(&r.Year, &r.Name, &r.Description, &r.TotalReceived, &r.TotalSold)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error reading row: %v", err), http.StatusInternalServerError)
+			return
+		}
+		reports = append(reports, r)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reports)
+}
