@@ -316,3 +316,60 @@ func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(reports)
 }
+func TotalProductQuantityReport(w http.ResponseWriter, r *http.Request) {
+	// Parse JSON body to get store_id
+	var input struct {
+		StoreID int `json:"store_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// SQL Query for total quantity of products in a store
+	query := `
+	SELECT 
+		p.name,
+		p.description,
+		SUM(i.quantity) AS total_quantity
+	FROM 
+		Inventory i
+	JOIN 
+		Products p ON i.product_id = p.product_id
+	WHERE 
+		i.store_id = $1
+	GROUP BY 
+		p.name, p.description
+	ORDER BY 
+		p.name;
+	`
+
+	rows, err := Db.Query(query, input.StoreID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type Report struct {
+		Name          string `json:"name"`
+		Description   string `json:"description"`
+		TotalQuantity int    `json:"total_quantity"`
+	}
+
+	var reports []Report
+
+	for rows.Next() {
+		var r Report
+		err := rows.Scan(&r.Name, &r.Description, &r.TotalQuantity)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error reading row: %v", err), http.StatusInternalServerError)
+			return
+		}
+		reports = append(reports, r)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reports)
+}
