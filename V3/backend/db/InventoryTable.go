@@ -236,3 +236,58 @@ func GetSupplierData(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(results)
 }
+func LowStockAlerts(w http.ResponseWriter, r *http.Request) {
+	// Parse store ID from JSON body
+	var input struct {
+		StoreID int `json:"store_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Query for low stock products in the given store
+	query := `
+	SELECT 
+		p.name, 
+		p.description, 
+		p.product_id, 
+		i.quantity 
+	FROM 
+		Inventory i
+	JOIN 
+		Products p ON i.product_id = p.product_id 
+	WHERE 
+		i.store_id = $1 AND i.quantity < 10;
+	`
+
+	rows, err := Db.Query(query, input.StoreID)
+	if err != nil {
+		http.Error(w, "Error getting data", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+
+	for rows.Next() {
+		var name, desc string
+		var productID, qty int
+
+		if err := rows.Scan(&name, &desc, &productID, &qty); err != nil {
+			http.Error(w, "Error scanning data", http.StatusInternalServerError)
+			return
+		}
+
+		results = append(results, map[string]interface{}{
+			"name":        name,
+			"description": desc,
+			"product_id":  productID,
+			"quantity":    qty,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}

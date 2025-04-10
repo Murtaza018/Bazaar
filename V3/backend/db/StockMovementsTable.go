@@ -14,7 +14,7 @@ func CreateStockMovementsTable(Db *sql.DB) {
 	_, err := Db.Exec(`
 		CREATE TABLE IF NOT EXISTS StockMovements (
 			movement_id SERIAL PRIMARY KEY,
-
+			price INTEGER,
 			inventory_id INTEGER,
 			movement_type TEXT NOT NULL,
 			quantity INTEGER NOT NULL,
@@ -43,6 +43,17 @@ func StockIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	quantity, err := strconv.Atoi(quantityStr)
+	if err != nil {
+		http.Error(w, "Invalid quantity", http.StatusBadRequest)
+		return
+	}
+	priceStr := r.URL.Query().Get("price")
+	if priceStr == "" {
+		http.Error(w, "Price parameter missing", http.StatusBadRequest)
+		return
+	}
+
+	price, err := strconv.Atoi(priceStr)
 	if err != nil {
 		http.Error(w, "Invalid quantity", http.StatusBadRequest)
 		return
@@ -79,12 +90,12 @@ func StockIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Third query: Insert into StockMovements
-	_, err = tx.Exec(`INSERT INTO StockMovements (inventory_id, movement_type, quantity)
+	_, err = tx.Exec(`INSERT INTO StockMovements (inventory_id, movement_type, quantity,price)
 VALUES (
     (SELECT inventory_id FROM inventory WHERE product_id = $1 AND store_id = $2 LIMIT 1), 
     $3, 
-    $4
-)`, productID, storeID,"stock_in", quantity)
+    $4.$5
+)`, productID, storeID,"stock_in", quantity,price)
 	if err != nil {
 		tx.Rollback() // Revert changes if an error occurs
 		http.Error(w, fmt.Sprintf("Error in stock movements: %v", err), http.StatusInternalServerError)
@@ -122,7 +133,17 @@ func StockSold(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid quantity", http.StatusBadRequest)
 		return
 	}
+priceStr := r.URL.Query().Get("price")
+	if priceStr == "" {
+		http.Error(w, "Price parameter missing", http.StatusBadRequest)
+		return
+	}
 
+	price, err := strconv.Atoi(priceStr)
+	if err != nil {
+		http.Error(w, "Invalid quantity", http.StatusBadRequest)
+		return
+	}
 	// Get productID from URL parameters
 	productID := r.URL.Query().Get("product_id")
 	if productID == "" {
@@ -154,12 +175,12 @@ func StockSold(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert into StockMovements
-	_, err = tx.Exec(`INSERT INTO StockMovements (inventory_id, movement_type, quantity)
+	_, err = tx.Exec(`INSERT INTO StockMovements (inventory_id, movement_type, quantity,price)
 VALUES (
     (SELECT inventory_id FROM inventory WHERE product_id = $1 AND store_id = $2 LIMIT 1), 
     $3, 
-    $4
-)`, productID, storeID,"stock_sold", quantity)
+    $4,$5
+)`, productID, storeID,"stock_sold", quantity,price)
 	if err != nil {
 		tx.Rollback() // Revert changes if an error occurs
 		http.Error(w, fmt.Sprintf("Error in stock movements: %v", err), http.StatusInternalServerError)
@@ -184,7 +205,17 @@ func StockOut(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Store-ID header missing", http.StatusBadRequest)
 		return
 	}
+priceStr := r.URL.Query().Get("price")
+	if priceStr == "" {
+		http.Error(w, "Price parameter missing", http.StatusBadRequest)
+		return
+	}
 
+	price, err := strconv.Atoi(priceStr)
+	if err != nil {
+		http.Error(w, "Invalid quantity", http.StatusBadRequest)
+		return
+	}
 	// Parse quantity from the request body
 	quantityStr := r.URL.Query().Get("quantity")
 	if quantityStr == "" {
@@ -229,12 +260,12 @@ func StockOut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert into StockMovements
-	_, err = tx.Exec(`INSERT INTO StockMovements (inventory_id, movement_type, quantity)
+	_, err = tx.Exec(`INSERT INTO StockMovements (inventory_id, movement_type, quantity,price)
 VALUES (
     (SELECT inventory_id FROM inventory WHERE product_id = $1 AND store_id = $2 LIMIT 1), 
     $3, 
-    $4
-)`, productID, storeID,"manual_removal", quantity)
+    $4,$5
+)`, productID, storeID,"manual_removal", quantity,price)
 	if err != nil {
 		tx.Rollback() // Revert changes if an error occurs
 		http.Error(w, fmt.Sprintf("Error in stock movements: %v", err), http.StatusInternalServerError)
@@ -281,7 +312,7 @@ func ProductReceivedSoldReport(w http.ResponseWriter, r *http.Request) {
 	WHERE 
 		i.store_id = $1
 	GROUP BY 
-		year, p.name, p.description
+		year, p.product_id
 	ORDER BY 
 		year, p.name;
 	`
@@ -340,7 +371,7 @@ func TotalProductQuantityReport(w http.ResponseWriter, r *http.Request) {
 	WHERE 
 		i.store_id = $1
 	GROUP BY 
-		p.name, p.description
+		p.product_id
 	ORDER BY 
 		p.name;
 	`
@@ -373,3 +404,59 @@ func TotalProductQuantityReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(reports)
 }
+func ProductSoldReport(w http.ResponseWriter, r *http.Request) {
+	// Parse JSON body to get store_id and product_id
+	var input struct {
+		StoreID   int `json:"store_id"`
+		ProductID int `json:"product_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// SQL query for product sales report
+	query := `
+	SELECT 
+		p.name,
+		p.description,
+		SUM(sm.quantity * p.price) AS total_sales
+	FROM 
+		StockMovements sm
+	JOIN 
+		Inventory i ON sm.inventory_id = i.inventory_id
+	JOIN 
+		Products p ON i.product_id = p.product_id
+	WHERE 
+		i.store_id = $1
+		AND i.product_id = $2
+		AND sm.movement_type = 'stock_sold'
+	GROUP BY 
+		p.product_id;
+	`
+
+	row := Db.QueryRow(query, input.StoreID, input.ProductID)
+
+	type Report struct {
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		TotalSales  float64 `json:"total_sales"`
+	}
+
+	var report Report
+
+	err := row.Scan(&report.Name, &report.Description, &report.TotalSales)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "No sales data found for this product", http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Error reading data: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
