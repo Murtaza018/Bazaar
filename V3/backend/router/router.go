@@ -4,6 +4,8 @@ import (
 	"backend/db" // Replace with your module path
 	"net/http"
 
+	"backend/middleware"
+
 	"github.com/gorilla/mux"
 )
 
@@ -42,6 +44,8 @@ func SetupRouter() *mux.Router {
 	r.HandleFunc("/inventory/data/product", db.GetProductData).Methods("POST")
 	r.HandleFunc("/inventory/data/store", db.GetStoreData).Methods("POST")
 	r.HandleFunc("/inventory/data/supplier", db.GetSupplierData).Methods("POST")
+	r.HandleFunc("/inventory/alerts/lowstock", db.LowStockAlerts).Methods("POST")
 
+	r.Use(middleware.RateLimitMiddleware)
 	return r
 }
